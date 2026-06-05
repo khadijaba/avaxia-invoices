@@ -7,7 +7,6 @@ import {
   FlexBox, FlexBoxDirection, FlexBoxWrap,
   Title, Button, Tag,
   MessageStrip, BusyIndicator,
-  ObjectStatus,
 } from "@ui5/webcomponents-react";
 
 const statusColor = { Paid: "8", Unpaid: "1", Pending: "6" };

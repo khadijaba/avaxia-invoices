@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
-import { loginAPI } from "../services/api";
+import { registerAPI } from "../services/api";
 import {
   FlexBox,
   FlexBoxDirection,
@@ -16,21 +15,30 @@ import {
   Title,
 } from "@ui5/webcomponents-react";
 
-function Login() {
+function Register() {
+  const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError]       = useState("");
-  const [loading, setLoading]   = useState(false);
-  const { login } = useAuth();
-  const navigate  = useNavigate();
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
-  const handleLogin = async () => {
+  const handleRegister = async () => {
     setError("");
+    setSuccess("");
+
+    if (password !== confirm) {
+      setError("Les mots de passe ne correspondent pas");
+      return;
+    }
+
     setLoading(true);
     try {
-      const { token, user } = await loginAPI(username, password);
-      login(token, user);
-      navigate(user.role === "ADMIN" ? "/admin" : "/dashboard");
+      await registerAPI({ name, username, password });
+      setSuccess("Compte créé avec succès ! Redirection vers la connexion...");
+      setTimeout(() => navigate("/login"), 1500);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -49,19 +57,29 @@ function Login() {
         header={
           <CardHeader
             titleText="AVAXIA Group"
-            subtitleText="Plateforme de Gestion des Factures SAP"
+            subtitleText="Créer un nouveau compte"
           />
         }
         style={{ width: "400px", padding: "16px" }}
       >
         <FlexBox direction={FlexBoxDirection.Column} style={{ gap: "16px", padding: "16px" }}>
 
-          <Title level="H4">Connexion</Title>
+          <Title level="H4">Inscription</Title>
+
+          <FlexBox direction={FlexBoxDirection.Column} style={{ gap: "6px" }}>
+            <Label required>Nom complet</Label>
+            <Input
+              placeholder="Votre nom"
+              value={name}
+              onInput={(e) => setName(e.target.value)}
+              style={{ width: "100%" }}
+            />
+          </FlexBox>
 
           <FlexBox direction={FlexBoxDirection.Column} style={{ gap: "6px" }}>
             <Label required>Nom d'utilisateur</Label>
             <Input
-              placeholder="admin ou user"
+              placeholder="Choisissez un identifiant"
               value={username}
               onInput={(e) => setUsername(e.target.value)}
               style={{ width: "100%" }}
@@ -72,9 +90,20 @@ function Login() {
             <Label required>Mot de passe</Label>
             <Input
               type="Password"
-              placeholder="••••••••"
+              placeholder="Au moins 6 caractères"
               value={password}
               onInput={(e) => setPassword(e.target.value)}
+              style={{ width: "100%" }}
+            />
+          </FlexBox>
+
+          <FlexBox direction={FlexBoxDirection.Column} style={{ gap: "6px" }}>
+            <Label required>Confirmer le mot de passe</Label>
+            <Input
+              type="Password"
+              placeholder="••••••••"
+              value={confirm}
+              onInput={(e) => setConfirm(e.target.value)}
               style={{ width: "100%" }}
             />
           </FlexBox>
@@ -85,26 +114,28 @@ function Login() {
             </MessageStrip>
           )}
 
+          {success && (
+            <MessageStrip design="Positive" hideCloseButton>
+              {success}
+            </MessageStrip>
+          )}
+
           <Button
             design="Emphasized"
-            onClick={handleLogin}
+            onClick={handleRegister}
             disabled={loading}
             style={{ width: "100%" }}
           >
-            {loading ? "Connexion en cours..." : "Se connecter"}
+            {loading ? "Création en cours..." : "Créer mon compte"}
           </Button>
 
           <Button
             design="Transparent"
-            onClick={() => navigate("/register")}
+            onClick={() => navigate("/login")}
             style={{ width: "100%" }}
           >
-            Pas encore de compte ? Créer un compte
+            Déjà un compte ? Se connecter
           </Button>
-
-          <MessageStrip design="Information" hideCloseButton>
-            Admin : admin / admin123 | User : user / user123
-          </MessageStrip>
 
         </FlexBox>
       </Card>
@@ -112,4 +143,4 @@ function Login() {
   );
 }
 
-export default Login;
+export default Register;
