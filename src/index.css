@@ -1,0 +1,17 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --avaxia-primary:   #1a2e5a;
+  --avaxia-secondary: #e8410a;
+  --avaxia-light:     #f0f4ff;
+  --avaxia-gray:      #f5f6f8;
+}
+
+body {
+  font-family: "72", "72full", Arial, sans-serif;
+  background: var(--avaxia-gray);
+}
