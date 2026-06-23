@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
-import { loginAPI } from "../services/api";
+import { forgotPasswordAPI } from "../services/api";
 import {
   FlexBox,
   FlexBoxDirection,
@@ -11,40 +10,45 @@ import {
   MessageStrip,
 } from "@ui5/webcomponents-react";
 
-export default function Login() {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+function ForgotPassword() {
+  const [identifier, setIdentifier] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
   const navigate = useNavigate();
 
-  const handleLogin = async () => {
+  const handleSubmit = async () => {
     setError("");
+    setSuccess("");
+
+    if (!identifier.trim()) {
+      setError("Please enter your User ID or email address");
+      return;
+    }
+
     setLoading(true);
     try {
-      const { token, user } = await loginAPI(username.trim(), password.trim());
-      login(token, user);
-      navigate(user.role === "ADMIN" ? "/admin" : "/dashboard");
+      await forgotPasswordAPI(identifier.trim());
+      setSuccess(
+        "If an account exists with this User ID / email, you will receive a password reset link shortly."
+      );
+      // Redirection après 5 secondes
+      setTimeout(() => navigate("/login"), 5000);
     } catch (err) {
-      setError(err.message);
+      setError(err.message || "Something went wrong. Please try again later.");
     } finally {
       setLoading(false);
     }
   };
 
   const handleKey = (e) => {
-    if (e.key === "Enter") handleLogin();
+    if (e.key === "Enter") handleSubmit();
   };
-
- const handleForgotPassword = () => {
-  navigate("/forgot-password");
-};
 
   return (
     <div style={styles.page}>
       <div style={styles.card}>
-        {/* En-tête avec logo SAP et sélecteur de langue */}
+        {/* En-tête SAP Sales Cloud */}
         <div style={styles.cardHeader}>
           <div style={styles.logoArea}>
             <img
@@ -59,30 +63,23 @@ export default function Login() {
           </div>
         </div>
 
-        {/* Corps du formulaire */}
+        {/* Formulaire de réinitialisation */}
         <div style={styles.formBody}>
-          <FlexBox direction={FlexBoxDirection.Column} style={{ gap: "8px" }}>
-            <Label required style={styles.fieldLabel}>
-              User ID
-            </Label>
-            <Input
-              placeholder="Enter your user ID"
-              value={username}
-              onInput={(e) => setUsername(e.target.value)}
-              onKeyDown={handleKey}
-              style={styles.inputField}
-            />
-          </FlexBox>
+          <div style={styles.headerText}>
+            <h2 style={styles.title}>Reset your password</h2>
+            <p style={styles.subtitle}>
+              Enter your User ID or email address and we'll send you a link to reset your password.
+            </p>
+          </div>
 
           <FlexBox direction={FlexBoxDirection.Column} style={{ gap: "8px" }}>
             <Label required style={styles.fieldLabel}>
-              Password
+              User ID or Email
             </Label>
             <Input
-              type="Password"
-              placeholder="••••••••"
-              value={password}
-              onInput={(e) => setPassword(e.target.value)}
+              placeholder="e.g., john.doe@company.com or johndoe"
+              value={identifier}
+              onInput={(e) => setIdentifier(e.target.value)}
               onKeyDown={handleKey}
               style={styles.inputField}
             />
@@ -93,29 +90,33 @@ export default function Login() {
               {error}
             </MessageStrip>
           )}
+          {success && (
+            <MessageStrip design="Positive" hideCloseButton>
+              {success}
+            </MessageStrip>
+          )}
 
           <Button
             design="Emphasized"
-            onClick={handleLogin}
+            onClick={handleSubmit}
             disabled={loading}
-            style={styles.signInButton}
+            style={styles.submitButton}
           >
-            {loading ? "Signing in..." : "Sign In"}
+            {loading ? "Sending..." : "Send reset link"}
           </Button>
 
           <div style={styles.actionLinks}>
-            <button onClick={handleForgotPassword} style={styles.linkButton}>
-              Forgot Password?
+            <button onClick={() => navigate("/login")} style={styles.linkButton}>
+              Back to Sign In
             </button>
             <span style={styles.divider}>|</span>
             <button onClick={() => navigate("/register")} style={styles.linkButton}>
-              Create Account
+              Create an account
             </button>
           </div>
 
-          {/* Comptes de test (optionnel, pour faciliter la démo) */}
-          <div style={styles.testHint}>
-            <strong>Test accounts:</strong> admin / admin123 | user / user123
+          <div style={styles.contactHint}>
+            If you continue to experience issues, please contact your system administrator.
           </div>
         </div>
       </div>
@@ -182,6 +183,22 @@ const styles = {
     flexDirection: "column",
     gap: "22px",
   },
+  headerText: {
+    textAlign: "center",
+    marginBottom: "8px",
+  },
+  title: {
+    fontSize: "22px",
+    fontWeight: "600",
+    color: "#1e2a3e",
+    margin: "0 0 8px 0",
+  },
+  subtitle: {
+    fontSize: "13px",
+    color: "#5f6c80",
+    margin: 0,
+    lineHeight: 1.5,
+  },
   fieldLabel: {
     color: "#1e2a3e",
     fontWeight: "600",
@@ -190,7 +207,7 @@ const styles = {
   inputField: {
     width: "100%",
   },
-  signInButton: {
+  submitButton: {
     width: "100%",
     backgroundColor: "#0070f2",
     border: "none",
@@ -216,19 +233,19 @@ const styles = {
   divider: {
     color: "#b0b8c5",
   },
-  testHint: {
+  contactHint: {
     backgroundColor: "#f9fafb",
     borderRadius: "8px",
     padding: "12px 16px",
-    fontSize: "12px",
-    color: "#4a5b6e",
+    fontSize: "11px",
+    color: "#7a879b",
     textAlign: "center",
     border: "1px solid #e9ecef",
     marginTop: "8px",
   },
 };
 
-// Ajout d'un effet hover pour les liens (optionnel, via CSS-in-JS simulé)
+// Hover CSS
 const styleSheet = document.createElement("style");
 styleSheet.textContent = `
   button:hover {
@@ -236,3 +253,5 @@ styleSheet.textContent = `
   }
 `;
 document.head.appendChild(styleSheet);
+
+export default ForgotPassword;

@@ -3,19 +3,31 @@ import { useParams, useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { getInvoicesAPI, payInvoiceAPI } from "../services/api";
 import {
-  Card, CardHeader,
-  FlexBox, FlexBoxDirection, FlexBoxWrap,
-  Title, Button, Tag,
-  MessageStrip, BusyIndicator,
-  ObjectStatus,
+  DynamicPage, DynamicPageTitle, DynamicPageHeader,
+  ObjectPage, ObjectPageSection, ObjectPageSubSection,
+  ObjectPageTitle, ObjectPageHeader,
+  FlexBox, FlexBoxDirection, FlexBoxWrap, FlexBoxAlignItems,
+  Title, Button, Text, MessageStrip, BusyIndicator,
+  ObjectStatus, Tag, Card, CardHeader,
+  FormItem, Form, FormGroup,
+  Timeline, TimelineItem,
 } from "@ui5/webcomponents-react";
+import "@ui5/webcomponents-icons/dist/money-bills.js";
+import "@ui5/webcomponents-icons/dist/supplier.js";
+import "@ui5/webcomponents-icons/dist/calendar.js";
+import "@ui5/webcomponents-icons/dist/document-text.js";
+import "@ui5/webcomponents-icons/dist/history.js";
+import "@ui5/webcomponents-icons/dist/accept.js";
+import "@ui5/webcomponents-icons/dist/process.js";
+import "@ui5/webcomponents-icons/dist/create-form.js";
 
 const statusColor = { Paid: "8", Unpaid: "1", Pending: "6" };
+const statusState = { Paid: "Positive", Unpaid: "Negative", Pending: "Critical" };
 
 export default function InvoiceDetail() {
-  const { id }              = useParams();
-  const navigate            = useNavigate();
-  const [inv, setInv]       = useState(null);
+  const { id }                = useParams();
+  const navigate              = useNavigate();
+  const [inv, setInv]         = useState(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [paying, setPaying]   = useState(false);
@@ -53,88 +65,207 @@ export default function InvoiceDetail() {
   return (
     <div style={{ minHeight: "100vh", background: "#f5f6f7" }}>
       <Navbar />
-      <div style={{ padding: "24px 32px", maxWidth: "800px", margin: "0 auto" }}>
 
-        {/* Bouton retour */}
-        <Button design="Transparent" onClick={() => navigate(-1)} style={{ marginBottom: "16px" }}>
-          ← Retour
-        </Button>
+      {message && (
+        <MessageStrip design="Positive" hideCloseButton style={{ margin: "0 32px" }}>
+          {message}
+        </MessageStrip>
+      )}
 
-        <Title level="H3" style={{ marginBottom: "20px", color: "#1a2e5a" }}>
-          Détail Facture — {inv.id}
-        </Title>
+      <ObjectPage
+        style={{ height: "calc(100vh - 64px)" }}
+        titleArea={
+          <ObjectPageTitle
+            heading={
+              <Title level="H3" style={{ color: "#0064d9" }}>
+                {inv.id}
+              </Title>
+            }
+            subheading={
+              <Text style={{ color: "#6a6d70", fontSize: "13px" }}>
+                {inv.vendor} · {inv.date}
+              </Text>
+            }
+            actionsBar={
+              <FlexBox style={{ gap: "8px" }}>
+                <Button design="Default" onClick={() => navigate(-1)}>
+                  ← Retour
+                </Button>
+                {inv.status === "Unpaid" && (
+                  <Button design="Emphasized" onClick={handlePay} disabled={paying}>
+                    {paying ? "Paiement en cours..." : "Payer cette facture"}
+                  </Button>
+                )}
+              </FlexBox>
+            }
+          />
+        }
+        headerArea={
+          <ObjectPageHeader>
+            <FlexBox wrap={FlexBoxWrap.Wrap} style={{ gap: "32px", padding: "8px 0" }}>
+              <HeaderStat icon="💰" label="Montant" value={`${inv.amount.toLocaleString()} ${inv.currency}`} bold />
+              <HeaderStat icon="📅" label="Date"    value={inv.date} />
+              <HeaderStat icon="🏢" label="Fournisseur" value={inv.vendor} />
+              <HeaderStat icon="📊" label="Statut"  value={
+                <ObjectStatus state={statusState[inv.status]} inverted>
+                  {inv.status}
+                </ObjectStatus>
+              } />
+            </FlexBox>
+          </ObjectPageHeader>
+        }
+      >
 
-        {/* Message succès */}
-        {message && (
-          <MessageStrip design="Positive" hideCloseButton style={{ marginBottom: "16px" }}>
-            {message}
-          </MessageStrip>
-        )}
+        {/* Section 1 — Informations */}
+        <ObjectPageSection
+          id="info"
+          titleText="Informations de la Facture"
+        >
+          <ObjectPageSubSection
+            id="info-details"
+            titleText="Détails"
+          >
+            <Card header={<CardHeader titleText="Détails de la Facture" subtitleText={inv.vendor} />}>
+              <div style={{ padding: "20px" }}>
+                <Form layout="S1 M2 L3 XL4" labelSpan="S12 M4 L4 XL4">
+                  <FormGroup titleText="Identification">
+                    <FormItem labelContent={<span style={styles.label}>Référence</span>}>
+                      <Text style={styles.value}>{inv.id}</Text>
+                    </FormItem>
+                    <FormItem labelContent={<span style={styles.label}>Fournisseur</span>}>
+                      <Text style={styles.value}>{inv.vendor}</Text>
+                    </FormItem>
+                    <FormItem labelContent={<span style={styles.label}>Description</span>}>
+                      <Text style={styles.value}>{inv.description}</Text>
+                    </FormItem>
+                  </FormGroup>
+                  <FormGroup titleText="Financier">
+                    <FormItem labelContent={<span style={styles.label}>Montant</span>}>
+                      <Text style={{ ...styles.value, fontWeight: "700", color: "#0064d9", fontSize: "18px" }}>
+                        {inv.amount.toLocaleString()} {inv.currency}
+                      </Text>
+                    </FormItem>
+                    <FormItem labelContent={<span style={styles.label}>Date</span>}>
+                      <Text style={styles.value}>{inv.date}</Text>
+                    </FormItem>
+                    <FormItem labelContent={<span style={styles.label}>Statut</span>}>
+                      <ObjectStatus state={statusState[inv.status]} inverted>
+                        {inv.status}
+                      </ObjectStatus>
+                    </FormItem>
+                  </FormGroup>
+                </Form>
+              </div>
+            </Card>
+          </ObjectPageSubSection>
+        </ObjectPageSection>
 
-        {/* Infos principales */}
-        <Card header={<CardHeader titleText="Informations de la Facture" subtitleText={inv.vendor} />}
-              style={{ marginBottom: "16px" }}>
-          <FlexBox wrap={FlexBoxWrap.Wrap} style={{ padding: "20px", gap: "24px" }}>
-            <InfoItem label="Référence"    value={inv.id} />
-            <InfoItem label="Fournisseur"  value={inv.vendor} />
-            <InfoItem label="Description"  value={inv.description} />
-            <InfoItem label="Montant"      value={`${inv.amount.toLocaleString()} ${inv.currency}`} bold />
-            <InfoItem label="Date"         value={inv.date} />
-            <InfoItem label="Statut"       value={<Tag colorScheme={statusColor[inv.status]}>{inv.status}</Tag>} />
-          </FlexBox>
-        </Card>
+        {/* Section 2 — Historique */}
+        <ObjectPageSection
+          id="history"
+          titleText="Historique"
+        >
+          <ObjectPageSubSection
+            id="history-timeline"
+            titleText="Cycle de vie"
+          >
+            <Card header={<CardHeader titleText="Historique de la Facture" />}>
+              <div style={{ padding: "20px" }}>
+                <Timeline>
+                  <TimelineItem
+                    name="Facture créée"
+                    subtitleText={inv.date}
+                    icon="create-form"
+                    titleText="Facture créée"
+                  >
+                    <Text>La facture {inv.id} a été créée par {inv.vendor}.</Text>
+                  </TimelineItem>
 
-        {/* Historique */}
-        <Card header={<CardHeader titleText="Historique de la Facture" />}
-              style={{ marginBottom: "16px" }}>
-          <FlexBox direction={FlexBoxDirection.Column} style={{ padding: "20px", gap: "16px" }}>
-            <TimelineItem label="Facture créée"     date={inv.date} done />
-            <TimelineItem label="En cours de traitement" date="—"  done={inv.status !== "Unpaid"} />
-            <TimelineItem label="Paiement effectué" date={inv.status === "Paid" ? "Aujourd'hui" : "—"} done={inv.status === "Paid"} />
-          </FlexBox>
-        </Card>
+                  <TimelineItem
+                    name="En traitement"
+                    subtitleText="En cours"
+                    icon="process"
+                    titleText="En cours de traitement"
+                  >
+                    <Text>
+                      {inv.status !== "Unpaid"
+                        ? "La facture est en cours de traitement."
+                        : "En attente de traitement."}
+                    </Text>
+                  </TimelineItem>
 
-        {/* Actions */}
-        <Card>
-          <FlexBox style={{ padding: "16px", gap: "12px" }}>
-            <Button design="Default" onClick={() => navigate(-1)}>
-              Retour à la liste
-            </Button>
-            {inv.status === "Unpaid" && (
-              <Button design="Emphasized" onClick={handlePay} disabled={paying}>
-                {paying ? "Paiement en cours..." : "💳 Payer cette facture"}
-              </Button>
-            )}
-          </FlexBox>
-        </Card>
+                  <TimelineItem
+                    name="Paiement"
+                    subtitleText={inv.status === "Paid" ? "Aujourd'hui" : "En attente"}
+                    icon={inv.status === "Paid" ? "accept" : "history"}
+                    titleText={inv.status === "Paid" ? "Paiement effectué ✅" : "Paiement en attente"}
+                  >
+                    <Text>
+                      {inv.status === "Paid"
+                        ? `La facture ${inv.id} a été payée avec succès.`
+                        : "Le paiement n'a pas encore été effectué."}
+                    </Text>
+                  </TimelineItem>
+                </Timeline>
+              </div>
+            </Card>
+          </ObjectPageSubSection>
+        </ObjectPageSection>
 
-      </div>
+        {/* Section 3 — Actions */}
+        <ObjectPageSection
+          id="actions"
+          titleText="Actions"
+        >
+          <ObjectPageSubSection
+            id="actions-pay"
+            titleText="Actions disponibles"
+          >
+            <Card header={<CardHeader titleText="Actions sur la Facture" />}>
+              <FlexBox style={{ padding: "20px", gap: "12px", flexWrap: "wrap" }}>
+                <Button design="Default" onClick={() => navigate(-1)}>
+                  ← Retour à la liste
+                </Button>
+                {inv.status === "Unpaid" && (
+                  <Button design="Emphasized" onClick={handlePay} disabled={paying}>
+                    {paying ? "Paiement en cours..." : "💳 Payer cette facture"}
+                  </Button>
+                )}
+                {inv.status === "Paid" && (
+                  <MessageStrip design="Positive" hideCloseButton>
+                    ✅ Cette facture a déjà été payée.
+                  </MessageStrip>
+                )}
+                {inv.status === "Pending" && (
+                  <MessageStrip design="Warning" hideCloseButton>
+                    ⏳ Cette facture est en attente de validation.
+                  </MessageStrip>
+                )}
+              </FlexBox>
+            </Card>
+          </ObjectPageSubSection>
+        </ObjectPageSection>
+
+      </ObjectPage>
     </div>
   );
 }
 
-function InfoItem({ label, value, bold }) {
+function HeaderStat({ icon, label, value, bold }) {
   return (
-    <FlexBox direction={FlexBoxDirection.Column} style={{ minWidth: "200px", flex: 1 }}>
-      <span style={{ fontSize: "12px", color: "#888", fontWeight: "600", marginBottom: "4px" }}>{label}</span>
-      <span style={{ fontSize: "15px", color: "#1a2e5a", fontWeight: bold ? "700" : "400" }}>{value}</span>
+    <FlexBox direction={FlexBoxDirection.Column} style={{ gap: "4px" }}>
+      <Text style={{ fontSize: "12px", color: "#6a6d70", fontWeight: "600" }}>
+        {icon} {label}
+      </Text>
+      {bold
+        ? <Text style={{ fontSize: "16px", fontWeight: "700", color: "#0064d9" }}>{value}</Text>
+        : <Text style={{ fontSize: "14px", color: "#32363a" }}>{value}</Text>
+      }
     </FlexBox>
   );
 }
 
-function TimelineItem({ label, date, done }) {
-  return (
-    <FlexBox style={{ alignItems: "center", gap: "16px" }}>
-      <div style={{
-        width: "14px", height: "14px", borderRadius: "50%",
-        background: done ? "#1a2e5a" : "#ddd",
-        border: `2px solid ${done ? "#1a2e5a" : "#ccc"}`,
-        flexShrink: 0,
-      }} />
-      <FlexBox direction={FlexBoxDirection.Column}>
-        <span style={{ fontSize: "14px", fontWeight: "600", color: done ? "#333" : "#aaa" }}>{label}</span>
-        <span style={{ fontSize: "12px", color: "#888" }}>{date}</span>
-      </FlexBox>
-    </FlexBox>
-  );
-}
+const styles = {
+  label: { fontSize: "13px", color: "#6a6d70", fontWeight: "600" },
+  value: { fontSize: "14px", color: "#32363a" },
+};

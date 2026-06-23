@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
-import { loginAPI } from "../services/api";
+import { registerAPI } from "../services/api";
 import {
   FlexBox,
   FlexBoxDirection,
@@ -11,21 +10,38 @@ import {
   MessageStrip,
 } from "@ui5/webcomponents-react";
 
-export default function Login() {
+function Register() {
+  const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
   const navigate = useNavigate();
 
-  const handleLogin = async () => {
+  const handleRegister = async () => {
     setError("");
+    setSuccess("");
+
+    if (!name.trim()) {
+      setError("Full name is required");
+      return;
+    }
+    if (password !== confirm) {
+      setError("Passwords do not match");
+      return;
+    }
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters");
+      return;
+    }
+
     setLoading(true);
     try {
-      const { token, user } = await loginAPI(username.trim(), password.trim());
-      login(token, user);
-      navigate(user.role === "ADMIN" ? "/admin" : "/dashboard");
+      await registerAPI({ name, username, password });
+      setSuccess("Account created successfully! Redirecting to login...");
+      setTimeout(() => navigate("/login"), 1500);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -34,17 +50,17 @@ export default function Login() {
   };
 
   const handleKey = (e) => {
-    if (e.key === "Enter") handleLogin();
+    if (e.key === "Enter") handleRegister();
   };
 
- const handleForgotPassword = () => {
-  navigate("/forgot-password");
-};
+  const handleForgotPassword = () => {
+    alert("Please contact your administrator to reset your password.");
+  };
 
   return (
     <div style={styles.page}>
       <div style={styles.card}>
-        {/* En-tête avec logo SAP et sélecteur de langue */}
+        {/* En-tête identique à la page de connexion SAP Sales Cloud */}
         <div style={styles.cardHeader}>
           <div style={styles.logoArea}>
             <img
@@ -59,14 +75,29 @@ export default function Login() {
           </div>
         </div>
 
-        {/* Corps du formulaire */}
+        {/* Corps du formulaire d'inscription */}
         <div style={styles.formBody}>
+          {/* Champ Nom complet */}
+          <FlexBox direction={FlexBoxDirection.Column} style={{ gap: "8px" }}>
+            <Label required style={styles.fieldLabel}>
+              Full Name
+            </Label>
+            <Input
+              placeholder="Enter your full name"
+              value={name}
+              onInput={(e) => setName(e.target.value)}
+              onKeyDown={handleKey}
+              style={styles.inputField}
+            />
+          </FlexBox>
+
+          {/* Champ Nom d'utilisateur */}
           <FlexBox direction={FlexBoxDirection.Column} style={{ gap: "8px" }}>
             <Label required style={styles.fieldLabel}>
               User ID
             </Label>
             <Input
-              placeholder="Enter your user ID"
+              placeholder="Choose a user ID"
               value={username}
               onInput={(e) => setUsername(e.target.value)}
               onKeyDown={handleKey}
@@ -74,13 +105,14 @@ export default function Login() {
             />
           </FlexBox>
 
+          {/* Champ Mot de passe */}
           <FlexBox direction={FlexBoxDirection.Column} style={{ gap: "8px" }}>
             <Label required style={styles.fieldLabel}>
               Password
             </Label>
             <Input
               type="Password"
-              placeholder="••••••••"
+              placeholder="At least 6 characters"
               value={password}
               onInput={(e) => setPassword(e.target.value)}
               onKeyDown={handleKey}
@@ -88,34 +120,57 @@ export default function Login() {
             />
           </FlexBox>
 
+          {/* Champ Confirmation mot de passe */}
+          <FlexBox direction={FlexBoxDirection.Column} style={{ gap: "8px" }}>
+            <Label required style={styles.fieldLabel}>
+              Confirm Password
+            </Label>
+            <Input
+              type="Password"
+              placeholder="Re-enter your password"
+              value={confirm}
+              onInput={(e) => setConfirm(e.target.value)}
+              onKeyDown={handleKey}
+              style={styles.inputField}
+            />
+          </FlexBox>
+
+          {/* Messages d'erreur / succès */}
           {error && (
             <MessageStrip design="Negative" hideCloseButton>
               {error}
             </MessageStrip>
           )}
+          {success && (
+            <MessageStrip design="Positive" hideCloseButton>
+              {success}
+            </MessageStrip>
+          )}
 
+          {/* Bouton de création de compte */}
           <Button
             design="Emphasized"
-            onClick={handleLogin}
+            onClick={handleRegister}
             disabled={loading}
             style={styles.signInButton}
           >
-            {loading ? "Signing in..." : "Sign In"}
+            {loading ? "Creating account..." : "Create Account"}
           </Button>
 
+          {/* Liens d'action : retour connexion + mot de passe oublié */}
           <div style={styles.actionLinks}>
+            <button onClick={() => navigate("/login")} style={styles.linkButton}>
+              Already have an account? Sign In
+            </button>
+            <span style={styles.divider}>|</span>
             <button onClick={handleForgotPassword} style={styles.linkButton}>
               Forgot Password?
             </button>
-            <span style={styles.divider}>|</span>
-            <button onClick={() => navigate("/register")} style={styles.linkButton}>
-              Create Account
-            </button>
           </div>
 
-          {/* Comptes de test (optionnel, pour faciliter la démo) */}
+          {/* Indication pour les tests (optionnel) */}
           <div style={styles.testHint}>
-            <strong>Test accounts:</strong> admin / admin123 | user / user123
+            <strong>Demo:</strong> Create any account (min 6 char password) or use login: admin / admin123
           </div>
         </div>
       </div>
@@ -228,7 +283,7 @@ const styles = {
   },
 };
 
-// Ajout d'un effet hover pour les liens (optionnel, via CSS-in-JS simulé)
+// Ajout d'un effet hover pour les liens
 const styleSheet = document.createElement("style");
 styleSheet.textContent = `
   button:hover {
@@ -236,3 +291,5 @@ styleSheet.textContent = `
   }
 `;
 document.head.appendChild(styleSheet);
+
+export default Register;
