@@ -90,3 +90,13 @@ export async function getRoutinesAPI(token) {
   const data = await res.json();
   return data.value || [];
 }
+// ── HEALTH CHECK SAP ECC ──
+export async function getSapHealthAPI() {
+  try {
+    const res = await fetch(`${BASE_URL}/health/sap`);
+    const data = await res.json();
+    return data; // { connected: true/false, error, checkedAt }
+  } catch (err) {
+    return { connected: false, error: err.message, checkedAt: new Date().toISOString() };
+  }
+}

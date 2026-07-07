@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import Navbar from "../components/Navbar";
 import { useTheme } from "../context/ThemeContext";
-import { getInvoicesAPI, getLogsAPI, getHistAPI, getRoutinesAPI } from "../services/api";
+import { getInvoicesAPI, getLogsAPI, getHistAPI, getRoutinesAPI, getSapHealthAPI } from "../services/api";
 import {
   FlexBox, FlexBoxDirection, FlexBoxJustifyContent, FlexBoxAlignItems,
   Title, Button, BusyIndicator, Input, Select, Option, Icon,
@@ -33,10 +33,24 @@ import {
 
 const statusState = { Paid: "Positive", Unpaid: "Negative", Pending: "Critical" };
 
+// Couleurs distinctes par devise, utilisées dans les graphiques multi-devises
+const CURRENCY_COLORS = { USD: "#0a6ed1", EUR: "#f0ab00", TND: "#2e7d32", GBP: "#8e44ad" };
+const FALLBACK_COLORS = ["#0a6ed1", "#f0ab00", "#2e7d32", "#8e44ad", "#c0392b"];
+function colorForCurrency(cur, idx) {
+  return CURRENCY_COLORS[cur] || FALLBACK_COLORS[idx % FALLBACK_COLORS.length];
+}
+
 // Construit la clé "YYYY-MM" utilisée pour trier et filtrer par mois
 function monthKeyOf(dateStr) {
   const d = new Date(dateStr);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// Formate un objet { USD: 3300, EUR: 45 } en "3 300 USD + 45 EUR"
+function formatMultiCurrency(byCurrency, key) {
+  const entries = Object.entries(byCurrency).filter(([, v]) => v[key] > 0);
+  if (entries.length === 0) return "0";
+  return entries.map(([cur, v]) => `${v[key].toLocaleString()} ${cur}`).join(" + ");
 }
 
 function EmptyState({ icon, title, subtitle }) {
@@ -65,6 +79,8 @@ export default function AdminDashboard() {
   const [loading, setLoading]   = useState(true);
   const [periodFrom, setPeriodFrom] = useState("All");
   const [periodTo, setPeriodTo]     = useState("All");
+  const [sapStatus, setSapStatus] = useState({ connected: null, checkedAt: null });
+  const [chartCurrency, setChartCurrency] = useState(null); // devise utilisée pour le graphique d'évolution mensuelle
   const { token } = useAuth();
   const navigate  = useNavigate();
   const { isDark, palette } = useTheme();
@@ -83,6 +99,16 @@ export default function AdminDashboard() {
     }).catch(err => console.error(err))
       .finally(() => setLoading(false));
   }, [token]);
+
+  // Vérification périodique de la disponibilité de SAP ECC
+  useEffect(() => {
+    const checkHealth = () => {
+      getSapHealthAPI().then(setSapStatus);
+    };
+    checkHealth();
+    const interval = setInterval(checkHealth, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Liste des mois disponibles dans les données, pour peupler le filtre de période
   const availableMonths = useMemo(() => {
@@ -111,65 +137,136 @@ export default function AdminDashboard() {
 
   const resetPeriod = () => { setPeriodFrom("All"); setPeriodTo("All"); };
 
-  const stats = useMemo(() => {
-    const totalAmount  = periodInvoices.reduce((s, i) => s + (i.amount || 0), 0);
-    const paidAmount   = periodInvoices.filter(i => i.status === "Paid").reduce((s, i) => s + (i.amount || 0), 0);
-    const unpaidAmount = periodInvoices.filter(i => i.status === "Unpaid").reduce((s, i) => s + (i.amount || 0), 0);
-    const countByStatus = {
-      Paid:    periodInvoices.filter(i => i.status === "Paid").length,
-      Unpaid:  periodInvoices.filter(i => i.status === "Unpaid").length,
-      Pending: periodInvoices.filter(i => i.status === "Pending").length,
-    };
-    return { totalAmount, paidAmount, unpaidAmount, countByStatus };
+  // Devises réellement présentes dans les factures de la période sélectionnée
+  const currencies = useMemo(() => {
+    const set = new Set(periodInvoices.map(i => i.currency).filter(Boolean));
+    return Array.from(set).sort();
   }, [periodInvoices]);
 
+  // Sélectionne automatiquement une devise par défaut pour le graphique mensuel
+  // dès que les devises disponibles changent (ex: changement de période)
+  useEffect(() => {
+    if (currencies.length > 0 && !currencies.includes(chartCurrency)) {
+      setChartCurrency(currencies[0]);
+    }
+  }, [currencies, chartCurrency]);
+
+  // ── Montants agrégés par devise (jamais mélangés entre eux) ──
+  const statsByCurrency = useMemo(() => {
+    const map = {};
+    periodInvoices.forEach(inv => {
+      const cur = inv.currency || "—";
+      if (!map[cur]) map[cur] = { total: 0, paid: 0, unpaid: 0 };
+      map[cur].total += (inv.amount || 0);
+      if (inv.status === "Paid")   map[cur].paid   += (inv.amount || 0);
+      if (inv.status === "Unpaid") map[cur].unpaid += (inv.amount || 0);
+    });
+    return map;
+  }, [periodInvoices]);
+
+  // Comptage par statut : indépendant de la devise, donc pas de risque de mélange
+  const countByStatus = useMemo(() => ({
+    Paid:    periodInvoices.filter(i => i.status === "Paid").length,
+    Unpaid:  periodInvoices.filter(i => i.status === "Unpaid").length,
+    Pending: periodInvoices.filter(i => i.status === "Pending").length,
+  }), [periodInvoices]);
+
+  // Taux de paiement : calculé sur le NOMBRE de factures (pas les montants),
+  // pour rester valide même quand plusieurs devises coexistent.
+  const totalCount = periodInvoices.length;
+  const payRate = totalCount > 0 ? ((countByStatus.Paid / totalCount) * 100).toFixed(1) : "0.0";
+
+  // ── Top 5 fournisseurs : classement par NOMBRE de factures (critère équitable
+  // entre devises), puis répartition du montant par devise pour l'affichage empilé ──
   const topSuppliers = useMemo(() => {
     const vendorMap = new Map();
     periodInvoices.forEach(inv => {
-      vendorMap.set(inv.vendor, (vendorMap.get(inv.vendor) || 0) + (inv.amount || 0));
+      const key = inv.vendor || "—";
+      if (!vendorMap.has(key)) vendorMap.set(key, { name: key, count: 0 });
+      const entry = vendorMap.get(key);
+      entry.count += 1;
+      const cur = inv.currency || "—";
+      entry[cur] = (entry[cur] || 0) + (inv.amount || 0);
     });
-    return Array.from(vendorMap.entries())
-      .map(([name, revenue]) => ({ name, revenue }))
-      .sort((a, b) => b.revenue - a.revenue)
+    return Array.from(vendorMap.values())
+      .sort((a, b) => b.count - a.count)
       .slice(0, 5);
   }, [periodInvoices]);
 
-  // Données mensuelles triées chronologiquement (nécessaire pour un graphique d'évolution fiable
-  // et pour calculer les tendances mois vs mois précédent)
-  const monthlyData = useMemo(() => {
+  // ── Données mensuelles, décomposées par devise ──
+  const monthlyDataAll = useMemo(() => {
     const monthMap = new Map();
     periodInvoices.forEach(inv => {
       const monthKey  = monthKeyOf(inv.date);
       const monthName = new Date(inv.date).toLocaleString("fr-FR", { month: "short", year: "numeric" });
-      const current   = monthMap.get(monthKey) || { monthKey, month: monthName, total: 0, paid: 0, unpaid: 0 };
-      current.total  += (inv.amount || 0);
-      if (inv.status === "Paid")   current.paid   += (inv.amount || 0);
-      if (inv.status === "Unpaid") current.unpaid += (inv.amount || 0);
-      monthMap.set(monthKey, current);
+      const cur = inv.currency || "—";
+      if (!monthMap.has(monthKey)) monthMap.set(monthKey, { monthKey, month: monthName, byCurrency: {} });
+      const entry = monthMap.get(monthKey);
+      if (!entry.byCurrency[cur]) entry.byCurrency[cur] = { total: 0, paid: 0, unpaid: 0 };
+      entry.byCurrency[cur].total  += (inv.amount || 0);
+      if (inv.status === "Paid")   entry.byCurrency[cur].paid   += (inv.amount || 0);
+      if (inv.status === "Unpaid") entry.byCurrency[cur].unpaid += (inv.amount || 0);
     });
     return Array.from(monthMap.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
   }, [periodInvoices]);
 
-  // Variation par rapport au mois précédent, pour les indicateurs de tendance des cartes KPI
+  // Données du graphique mensuel, filtrées sur la devise sélectionnée uniquement
+  // (mélanger des devises différentes sur une même courbe n'aurait pas de sens)
+  const monthlyDataForChart = useMemo(() => {
+    return monthlyDataAll.map(m => ({
+      month: m.month,
+      monthKey: m.monthKey,
+      total:  m.byCurrency[chartCurrency]?.total  || 0,
+      paid:   m.byCurrency[chartCurrency]?.paid   || 0,
+      unpaid: m.byCurrency[chartCurrency]?.unpaid || 0,
+    }));
+  }, [monthlyDataAll, chartCurrency]);
+
+  // Comptage mensuel (indépendant de la devise), utilisé pour la tendance du taux de paiement
+  const monthlyCounts = useMemo(() => {
+    const map = new Map();
+    periodInvoices.forEach(inv => {
+      const key = monthKeyOf(inv.date);
+      const entry = map.get(key) || { monthKey: key, total: 0, paid: 0 };
+      entry.total += 1;
+      if (inv.status === "Paid") entry.paid += 1;
+      map.set(key, entry);
+    });
+    return Array.from(map.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+  }, [periodInvoices]);
+
+  // Variation par rapport au mois précédent (basée sur la devise sélectionnée pour les montants,
+  // et sur le nombre de factures pour le taux de paiement)
   const trends = useMemo(() => {
-    if (monthlyData.length < 2) return { total: null, paid: null, unpaid: null, rate: null };
-    const curr = monthlyData[monthlyData.length - 1];
-    const prev = monthlyData[monthlyData.length - 2];
     const pctChange = (c, p) => (p === 0 ? null : ((c - p) / p) * 100);
-    const currRate = curr.total > 0 ? (curr.paid / curr.total) * 100 : 0;
-    const prevRate = prev.total > 0 ? (prev.paid / prev.total) * 100 : 0;
-    return {
-      total: pctChange(curr.total, prev.total),
-      paid: pctChange(curr.paid, prev.paid),
-      unpaid: pctChange(curr.unpaid, prev.unpaid),
-      rate: currRate - prevRate,
-    };
-  }, [monthlyData]);
+
+    let amountTrends = { total: null, paid: null, unpaid: null };
+    if (monthlyDataForChart.length >= 2) {
+      const curr = monthlyDataForChart[monthlyDataForChart.length - 1];
+      const prev = monthlyDataForChart[monthlyDataForChart.length - 2];
+      amountTrends = {
+        total:  pctChange(curr.total,  prev.total),
+        paid:   pctChange(curr.paid,   prev.paid),
+        unpaid: pctChange(curr.unpaid, prev.unpaid),
+      };
+    }
+
+    let rateTrend = null;
+    if (monthlyCounts.length >= 2) {
+      const curr = monthlyCounts[monthlyCounts.length - 1];
+      const prev = monthlyCounts[monthlyCounts.length - 2];
+      const currRate = curr.total > 0 ? (curr.paid / curr.total) * 100 : 0;
+      const prevRate = prev.total > 0 ? (prev.paid / prev.total) * 100 : 0;
+      rateTrend = currRate - prevRate;
+    }
+
+    return { ...amountTrends, rate: rateTrend };
+  }, [monthlyDataForChart, monthlyCounts]);
 
   const pieData = [
-    { name: "Payées",     value: stats.countByStatus.Paid,    color: "#2e7d32" },
-    { name: "Non payées", value: stats.countByStatus.Unpaid,  color: "#c62828" },
-    { name: "En attente", value: stats.countByStatus.Pending, color: "#e65100" },
+    { name: "Payées",     value: countByStatus.Paid,    color: "#2e7d32" },
+    { name: "Non payées", value: countByStatus.Unpaid,  color: "#c62828" },
+    { name: "En attente", value: countByStatus.Pending, color: "#e65100" },
   ].filter(d => d.value > 0);
 
   const filtered = periodInvoices
@@ -178,10 +275,6 @@ export default function AdminDashboard() {
       (i.vendor?.toLowerCase() || "").includes(search.toLowerCase()) ||
       (i.id?.toLowerCase() || "").includes(search.toLowerCase())
     );
-
-  const payRate = stats.totalAmount > 0
-    ? ((stats.paidAmount / stats.totalAmount) * 100).toFixed(1)
-    : "0.0";
 
   return (
     <div className="avaxia-dashboard" style={{ minHeight: "100vh", background: palette.pageBg }}>
@@ -206,6 +299,7 @@ export default function AdminDashboard() {
               Plateforme d'Intégration et de Gestion des Factures SAP
             </Title>
             <RoleBadge />
+            <SapStatusBadge status={sapStatus} />
           </FlexBox>
           <FlexBox style={{ gap: "8px" }}>
             <Button icon="refresh" design="Transparent" onClick={() => window.location.reload()}>Actualiser</Button>
@@ -240,21 +334,21 @@ export default function AdminDashboard() {
         <FlexBox style={{ gap: "16px", marginBottom: "24px", flexWrap: "wrap" }}>
           <KpiCard
             title="Montant total facturé"
-            value={`${stats.totalAmount.toLocaleString()} TND`}
+            value={formatMultiCurrency(statsByCurrency, "total")}
             color="#0064d9"
             icon="money-bills"
             trendValue={trends.total}
           />
           <KpiCard
             title="Factures payées"
-            value={`${stats.paidAmount.toLocaleString()} TND`}
+            value={formatMultiCurrency(statsByCurrency, "paid")}
             color="#2e7d32"
             icon="complete"
             trendValue={trends.paid}
           />
           <KpiCard
             title="Factures impayées"
-            value={`${stats.unpaidAmount.toLocaleString()} TND`}
+            value={formatMultiCurrency(statsByCurrency, "unpaid")}
             color="#c62828"
             icon="alert"
             trendValue={trends.unpaid}
@@ -262,6 +356,7 @@ export default function AdminDashboard() {
           />
           <KpiCard
             title="Taux de paiement"
+            subtitle="basé sur le nombre de factures"
             value={`${payRate}%`}
             color="#1b70b9"
             icon="line-chart"
@@ -273,19 +368,24 @@ export default function AdminDashboard() {
         <FlexBox style={{ gap: "24px", marginBottom: "32px", flexWrap: "wrap" }}>
           <div style={{ flex: 2, minWidth: "300px", background: palette.cardBg, border: `1px solid ${palette.border}`, borderRadius: "12px", padding: "16px" }}>
             <Title level="H4" style={{ marginBottom: "16px" }}>Top 5 fournisseurs</Title>
+            <Text style={{ fontSize: "12px", color: palette.textSecondary, marginBottom: "8px", display: "block" }}>
+              Classement par nombre de factures — montants empilés par devise
+            </Text>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={topSuppliers}>
                 <CartesianGrid strokeDasharray="3 3" stroke={palette.chartGrid} />
                 <XAxis dataKey="name" angle={-45} textAnchor="end" height={80} tick={{ fill: palette.chartAxis, fontSize: 12 }} />
-                <YAxis tickFormatter={v => `${v / 1000}K`} tick={{ fill: palette.chartAxis, fontSize: 12 }} />
+                <YAxis tick={{ fill: palette.chartAxis, fontSize: 12 }} />
                 <Tooltip
-                  formatter={v => `${v.toLocaleString()} TND`}
+                  formatter={(value, name) => [`${value.toLocaleString()} ${name}`, name]}
                   contentStyle={{ background: palette.tooltipBg, border: `1px solid ${palette.tooltipBorder}` }}
                   labelStyle={{ color: palette.textPrimary }}
                   itemStyle={{ color: palette.textPrimary }}
                 />
                 <Legend wrapperStyle={{ color: palette.textSecondary }} />
-                <Bar dataKey="revenue" fill="#0a6ed1" name="Montant (TND)" />
+                {currencies.map((cur, idx) => (
+                  <Bar key={cur} dataKey={cur} stackId="amount" fill={colorForCurrency(cur, idx)} name={cur} />
+                ))}
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -306,14 +406,23 @@ export default function AdminDashboard() {
           </div>
 
           <div style={{ flex: 2, minWidth: "300px", background: palette.cardBg, border: `1px solid ${palette.border}`, borderRadius: "12px", padding: "16px" }}>
-            <Title level="H4" style={{ marginBottom: "16px" }}>Évolution mensuelle</Title>
+            <FlexBox justifyContent={FlexBoxJustifyContent.SpaceBetween} alignItems={FlexBoxAlignItems.Center} style={{ marginBottom: "16px" }}>
+              <Title level="H4">Évolution mensuelle</Title>
+              {currencies.length > 1 && (
+                <Select onChange={e => setChartCurrency(e.detail.selectedOption.value)} style={{ width: "110px" }}>
+                  {currencies.map(cur => (
+                    <Option key={cur} value={cur} selected={chartCurrency === cur}>{cur}</Option>
+                  ))}
+                </Select>
+              )}
+            </FlexBox>
             <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={monthlyData}>
+              <LineChart data={monthlyDataForChart}>
                 <CartesianGrid strokeDasharray="3 3" stroke={palette.chartGrid} />
                 <XAxis dataKey="month" tick={{ fill: palette.chartAxis, fontSize: 12 }} />
-                <YAxis tickFormatter={v => `${v / 1000}K`} tick={{ fill: palette.chartAxis, fontSize: 12 }} />
+                <YAxis tick={{ fill: palette.chartAxis, fontSize: 12 }} />
                 <Tooltip
-                  formatter={v => `${v.toLocaleString()} TND`}
+                  formatter={v => `${v.toLocaleString()} ${chartCurrency || ""}`}
                   contentStyle={{ background: palette.tooltipBg, border: `1px solid ${palette.tooltipBorder}` }}
                   labelStyle={{ color: palette.textPrimary }}
                   itemStyle={{ color: palette.textPrimary }}
@@ -349,10 +458,11 @@ export default function AdminDashboard() {
             ) : (
               <Table headerRow={
                 <TableHeaderRow sticky>
-                  <TableHeaderCell style={{ width: "180px" }}>Facture</TableHeaderCell>
-                  <TableHeaderCell style={{ width: "200px" }}>Fournisseur</TableHeaderCell>
-                  <TableHeaderCell style={{ width: "250px" }}>Description</TableHeaderCell>
-                  <TableHeaderCell style={{ width: "150px" }}>Montant</TableHeaderCell>
+                  <TableHeaderCell style={{ width: "160px" }}>Facture</TableHeaderCell>
+                  <TableHeaderCell style={{ width: "180px" }}>Fournisseur</TableHeaderCell>
+                  <TableHeaderCell style={{ width: "220px" }}>Description</TableHeaderCell>
+                  <TableHeaderCell style={{ width: "120px" }}>Montant</TableHeaderCell>
+                  <TableHeaderCell style={{ width: "90px" }}>Devise</TableHeaderCell>
                   <TableHeaderCell style={{ width: "120px" }}>Date</TableHeaderCell>
                   <TableHeaderCell style={{ width: "130px" }}>Statut</TableHeaderCell>
                   <TableHeaderCell style={{ width: "130px" }}>Action</TableHeaderCell>
@@ -363,7 +473,8 @@ export default function AdminDashboard() {
                     <TableCell><Text style={{ fontWeight: "700" }}>{inv.id}</Text></TableCell>
                     <TableCell><Text>{inv.vendor}</Text></TableCell>
                     <TableCell><Text>{inv.description}</Text></TableCell>
-                    <TableCell><Text style={{ fontWeight: "700" }}>{(inv.amount || 0).toLocaleString()} {inv.currency}</Text></TableCell>
+                    <TableCell><Text style={{ fontWeight: "700" }}>{(inv.amount || 0).toLocaleString()}</Text></TableCell>
+                    <TableCell><Text>{inv.currency}</Text></TableCell>
                     <TableCell><Text>{inv.date}</Text></TableCell>
                     <TableCell>
                       <ObjectStatus state={statusState[inv.status] || "None"} inverted>{statusLabel(inv.status)}</ObjectStatus>
@@ -511,6 +622,43 @@ function RoleBadge() {
   );
 }
 
+function SapStatusBadge({ status }) {
+  const { palette } = useTheme();
+
+  if (status.connected === null) {
+    return (
+      <FlexBox alignItems={FlexBoxAlignItems.Center} style={{
+        gap: "6px", background: palette.badgeBg, color: palette.textSecondary, fontSize: "12px", fontWeight: "700",
+        padding: "4px 12px", borderRadius: "999px",
+      }}>
+        Vérification...
+      </FlexBox>
+    );
+  }
+
+  const isUp = status.connected;
+  const color = isUp ? "#2e7d32" : "#c62828";
+  const bg = isUp ? "#2e7d321A" : "#c628281A";
+  const label = isUp ? "SAP ECC : Connecté" : "SAP ECC : Injoignable";
+
+  return (
+    <FlexBox
+      alignItems={FlexBoxAlignItems.Center}
+      title={status.error || undefined}
+      style={{
+        gap: "6px", background: bg, color, fontSize: "12px", fontWeight: "700",
+        padding: "4px 12px", borderRadius: "999px",
+      }}
+    >
+      <div style={{
+        width: "8px", height: "8px", borderRadius: "50%", background: color,
+        boxShadow: isUp ? `0 0 0 3px ${color}33` : "none",
+      }} />
+      {label}
+    </FlexBox>
+  );
+}
+
 function TrendIndicator({ value, suffix = "%", invert = false }) {
   const { palette } = useTheme();
   if (value === null || value === undefined || Number.isNaN(value)) {
@@ -530,7 +678,7 @@ function TrendIndicator({ value, suffix = "%", invert = false }) {
   );
 }
 
-function KpiCard({ title, value, color, icon, trendValue, trendSuffix, trendInvert }) {
+function KpiCard({ title, subtitle, value, color, icon, trendValue, trendSuffix, trendInvert }) {
   const { palette } = useTheme();
   return (
     <Card style={{ flex: 1, minWidth: "220px" }}>
@@ -546,9 +694,14 @@ function KpiCard({ title, value, color, icon, trendValue, trendSuffix, trendInve
             </div>
           )}
         </FlexBox>
-        <Text style={{ fontSize: "28px", fontWeight: "700", color: color || palette.textPrimary, marginTop: "8px", display: "block" }}>
+        <Text style={{ fontSize: "22px", fontWeight: "700", color: color || palette.textPrimary, marginTop: "8px", display: "block", lineHeight: "1.3" }}>
           {value}
         </Text>
+        {subtitle && (
+          <Text style={{ fontSize: "11px", color: palette.textTertiary, display: "block", marginTop: "2px" }}>
+            {subtitle}
+          </Text>
+        )}
         <TrendIndicator value={trendValue} suffix={trendSuffix} invert={trendInvert} />
       </div>
     </Card>

@@ -102,7 +102,7 @@ function Navbar() {
         >
           <MenuItem text="Français" />
           <MenuItem text="English" />
-          <MenuItem text="عربي" />
+          <MenuItem text="Arabe" />
         </Menu>
       </div>
 
